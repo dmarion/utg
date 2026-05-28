@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include <rte_arp.h>
 #include <rte_cycles.h>
@@ -10,6 +11,55 @@
 #include <rte_ethdev.h>
 #include <rte_ip.h>
 #include <rte_mbuf.h>
+
+static void print_mac(const struct rte_ether_addr *addr)
+{
+    printf("%02X:%02X:%02X:%02X:%02X:%02X",
+        addr->addr_bytes[0], addr->addr_bytes[1], addr->addr_bytes[2],
+        addr->addr_bytes[3], addr->addr_bytes[4], addr->addr_bytes[5]);
+}
+
+static void print_ipv4(uint32_t ip)
+{
+    printf("%u.%u.%u.%u",
+        (uint8_t)(ip >> 24), (uint8_t)(ip >> 16), (uint8_t)(ip >> 8), (uint8_t)ip);
+}
+
+static void print_arp_request(uint16_t port_id, const struct app_config *cfg,
+    const struct rte_ether_addr *dst_mac, const struct rte_ether_addr *tha)
+{
+    printf("ARP TX port %u request eth ", port_id);
+    print_mac(&cfg->src_mac);
+    printf(" -> ");
+    print_mac(dst_mac);
+    printf(", who-has ");
+    print_ipv4(cfg->dst_ip);
+    printf(" tell ");
+    print_ipv4(cfg->src_ip);
+    printf(", sha ");
+    print_mac(&cfg->src_mac);
+    printf(", tha ");
+    print_mac(tha);
+    printf("\n");
+}
+
+static void print_arp_reply(uint16_t port_id, const struct rte_ether_hdr *eth,
+    const struct rte_arp_hdr *arp)
+{
+    printf("ARP RX port %u reply eth ", port_id);
+    print_mac(&eth->src_addr);
+    printf(" -> ");
+    print_mac(&eth->dst_addr);
+    printf(", ");
+    print_ipv4(rte_be_to_cpu_32(arp->arp_data.arp_sip));
+    printf(" is-at ");
+    print_mac(&arp->arp_data.arp_sha);
+    printf(", target ");
+    print_ipv4(rte_be_to_cpu_32(arp->arp_data.arp_tip));
+    printf(" ");
+    print_mac(&arp->arp_data.arp_tha);
+    printf("\n");
+}
 
 static void send_arp_packet(uint16_t port_id, struct rte_mempool *mbuf_pool,
     const struct app_config *cfg, const struct rte_ether_addr *dst_mac,
@@ -58,6 +108,7 @@ static void send_arp_request(uint16_t port_id, struct rte_mempool *mbuf_pool,
     };
     const struct rte_ether_addr zero = { .addr_bytes = { 0, 0, 0, 0, 0, 0 } };
 
+    print_arp_request(port_id, cfg, &broadcast, &zero);
     send_arp_packet(port_id, mbuf_pool, cfg, &broadcast, &zero, RTE_ARP_OP_REQUEST, cfg->dst_ip);
 }
 
@@ -93,6 +144,7 @@ static int try_receive_arp_reply(uint16_t port_id, const struct app_config *cfg,
                     arp->arp_data.arp_sip == rte_cpu_to_be_32(cfg->dst_ip) &&
                     arp->arp_data.arp_tip == rte_cpu_to_be_32(cfg->src_ip);
                 if (match) {
+                    print_arp_reply(port_id, eth, arp);
                     rte_ether_addr_copy(&arp->arp_data.arp_sha, resolved_mac);
                 }
             }

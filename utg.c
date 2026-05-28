@@ -255,11 +255,9 @@ static int port_init(uint16_t port_id, struct rte_mempool *mbuf_pool, uint16_t n
     }
 
     ret = rte_eth_dev_flow_ctrl_set(port_id, &fc_conf);
-    if (ret == -ENOTSUP || ret == -EOPNOTSUPP) {
-        fprintf(stderr, "Warning: flow control disable not supported on port %" PRIu16 "\n",
-            port_id);
-    } else if (ret < 0) {
-        return ret;
+    if (ret < 0) {
+        fprintf(stderr, "Warning: could not disable flow control on port %" PRIu16 ": %s\n",
+            port_id, rte_strerror(-ret));
     }
 
     rte_eth_promiscuous_enable(port_id);
