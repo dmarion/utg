@@ -24,12 +24,14 @@ struct app_config {
     uint64_t total_packets;
     double rate_mpps;
     bool dst_mac_override;
+    bool gw_ip_set;
     struct rte_ether_addr src_mac;
     struct rte_ether_addr dst_mac;
     uint32_t src_ip;
     uint32_t src_ip_rnd_mask;
     uint32_t dst_ip;
     uint32_t dst_ip_rnd_mask;
+    uint32_t gw_ip;
 };
 
 struct io_counters {

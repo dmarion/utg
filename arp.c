@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <rte_arp.h>
 #include <rte_cycles.h>
@@ -25,15 +26,22 @@ static void print_ipv4(uint32_t ip)
         (uint8_t)(ip >> 24), (uint8_t)(ip >> 16), (uint8_t)(ip >> 8), (uint8_t)ip);
 }
 
+static uint32_t arp_target_ip(const struct app_config *cfg)
+{
+    return cfg->gw_ip_set ? cfg->gw_ip : cfg->dst_ip;
+}
+
 static void print_arp_request(uint16_t port_id, const struct app_config *cfg,
     const struct rte_ether_addr *dst_mac, const struct rte_ether_addr *tha)
 {
+    const uint32_t target_ip = arp_target_ip(cfg);
+
     printf("ARP TX port %u request eth ", port_id);
     print_mac(&cfg->src_mac);
     printf(" -> ");
     print_mac(dst_mac);
     printf(", who-has ");
-    print_ipv4(cfg->dst_ip);
+    print_ipv4(target_ip);
     printf(" tell ");
     print_ipv4(cfg->src_ip);
     printf(", sha ");
@@ -65,7 +73,8 @@ static void send_arp_packet(uint16_t port_id, struct rte_mempool *mbuf_pool,
     const struct app_config *cfg, const struct rte_ether_addr *dst_mac,
     const struct rte_ether_addr *tha, uint16_t opcode, uint32_t tip)
 {
-    const uint16_t pkt_len = (uint16_t)(sizeof(struct rte_ether_hdr) + sizeof(struct rte_arp_hdr));
+    const uint16_t arp_len = (uint16_t)(sizeof(struct rte_ether_hdr) + sizeof(struct rte_arp_hdr));
+    const uint16_t pkt_len = RTE_ETHER_MIN_LEN - RTE_ETHER_CRC_LEN;
     struct rte_mbuf *mbuf;
     struct rte_ether_hdr *eth;
     struct rte_arp_hdr *arp;
@@ -93,6 +102,7 @@ static void send_arp_packet(uint16_t port_id, struct rte_mempool *mbuf_pool,
     arp->arp_data.arp_sip = rte_cpu_to_be_32(cfg->src_ip);
     rte_ether_addr_copy(tha, &arp->arp_data.arp_tha);
     arp->arp_data.arp_tip = rte_cpu_to_be_32(tip);
+    memset((uint8_t *)eth + arp_len, 0, pkt_len - arp_len);
 
     if (rte_eth_tx_burst(port_id, 0, &mbuf, 1) != 1) {
         rte_pktmbuf_free(mbuf);
@@ -109,7 +119,8 @@ static void send_arp_request(uint16_t port_id, struct rte_mempool *mbuf_pool,
     const struct rte_ether_addr zero = { .addr_bytes = { 0, 0, 0, 0, 0, 0 } };
 
     print_arp_request(port_id, cfg, &broadcast, &zero);
-    send_arp_packet(port_id, mbuf_pool, cfg, &broadcast, &zero, RTE_ARP_OP_REQUEST, cfg->dst_ip);
+    send_arp_packet(port_id, mbuf_pool, cfg, &broadcast, &zero,
+        RTE_ARP_OP_REQUEST, arp_target_ip(cfg));
 }
 
 void send_gratuitous_arp(uint16_t port_id, struct rte_mempool *mbuf_pool,
@@ -127,6 +138,7 @@ static int try_receive_arp_reply(uint16_t port_id, const struct app_config *cfg,
     struct rte_ether_addr *resolved_mac)
 {
     struct rte_mbuf *rx_mbufs[BURST_DEFAULT];
+    const uint32_t target_ip = arp_target_ip(cfg);
     uint16_t nb_rx;
 
     nb_rx = rte_eth_rx_burst(port_id, 0, rx_mbufs, BURST_DEFAULT);
@@ -141,7 +153,7 @@ static int try_receive_arp_reply(uint16_t port_id, const struct app_config *cfg,
             if (eth->ether_type == rte_cpu_to_be_16(RTE_ETHER_TYPE_ARP)) {
                 arp = (struct rte_arp_hdr *)(eth + 1);
                 match = arp->arp_opcode == rte_cpu_to_be_16(RTE_ARP_OP_REPLY) &&
-                    arp->arp_data.arp_sip == rte_cpu_to_be_32(cfg->dst_ip) &&
+                    arp->arp_data.arp_sip == rte_cpu_to_be_32(target_ip) &&
                     arp->arp_data.arp_tip == rte_cpu_to_be_32(cfg->src_ip);
                 if (match) {
                     print_arp_reply(port_id, eth, arp);

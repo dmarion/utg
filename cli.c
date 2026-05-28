@@ -93,6 +93,7 @@ void usage(const char *prog)
         "  --dst-ip IPv4       Destination IPv4 address (default: 10.0.0.1)\n"
         "  --dst-ip-rnd-mask IPv4\n"
         "                     Randomize masked destination-IP bits per packet (default: 0.0.0.0)\n"
+        "  --gw-ip IPv4        Next-hop IPv4 address to resolve with ARP (default: dst-ip)\n"
         "  --dst-mac MAC       Destination MAC address (default: ff:ff:ff:ff:ff:ff)\n"
         "  --src-port N        UDP source port (default: 1234)\n"
         "  --src-port-rnd-mask N\n"
@@ -120,6 +121,7 @@ int parse_app_args(int argc, char **argv, struct app_config *cfg)
         { "src-ip-rnd-mask", required_argument, NULL, 'S' },
         { "dst-ip", required_argument, NULL, 'd' },
         { "dst-ip-rnd-mask", required_argument, NULL, 'D' },
+        { "gw-ip", required_argument, NULL, 'g' },
         { "src-port", required_argument, NULL, 'q' },
         { "src-port-rnd-mask", required_argument, NULL, 'x' },
         { "dst-port", required_argument, NULL, 'r' },
@@ -165,6 +167,12 @@ int parse_app_args(int argc, char **argv, struct app_config *cfg)
             if (parse_ipv4_mask(optarg, &cfg->dst_ip_rnd_mask) != 0) {
                 return -1;
             }
+            break;
+        case 'g':
+            if (parse_ipv4(optarg, &cfg->gw_ip) != 0) {
+                return -1;
+            }
+            cfg->gw_ip_set = true;
             break;
         case 'q':
             if (parse_u16(optarg, &cfg->src_port) != 0) {

@@ -254,6 +254,14 @@ static int port_init(uint16_t port_id, struct rte_mempool *mbuf_pool, uint16_t n
         return ret;
     }
 
+    ret = rte_eth_dev_set_link_up(port_id);
+    if (ret == -ENOTSUP || ret == -EOPNOTSUPP) {
+        fprintf(stderr, "Warning: explicit link-up not supported on port %" PRIu16 "\n",
+            port_id);
+    } else if (ret < 0) {
+        return ret;
+    }
+
     ret = rte_eth_dev_flow_ctrl_set(port_id, &fc_conf);
     if (ret < 0) {
         fprintf(stderr, "Warning: could not disable flow control on port %" PRIu16 ": %s\n",
@@ -263,6 +271,28 @@ static int port_init(uint16_t port_id, struct rte_mempool *mbuf_pool, uint16_t n
     rte_eth_promiscuous_enable(port_id);
     (void)mbuf_pool;
     return 0;
+}
+
+static int wait_for_link_up(uint16_t port_id)
+{
+    const unsigned int max_checks = 50;
+    struct rte_eth_link link;
+
+    printf("Waiting for port %" PRIu16 " link up...\n", port_id);
+    for (unsigned int i = 0; i < max_checks; i++) {
+        memset(&link, 0, sizeof(link));
+        if (rte_eth_link_get_nowait(port_id, &link) == 0 &&
+            link.link_status == RTE_ETH_LINK_UP) {
+            printf("Port %" PRIu16 " link up: %u Mbps %s-duplex\n", port_id,
+                link.link_speed,
+                link.link_duplex == RTE_ETH_LINK_FULL_DUPLEX ? "full" : "half");
+            return 0;
+        }
+
+        rte_delay_us_sleep(100000);
+    }
+
+    return -ETIMEDOUT;
 }
 
 static double monotonic_seconds(void)
@@ -446,6 +476,9 @@ int main(int argc, char **argv)
         usage("utg");
         rte_exit(EXIT_FAILURE, "Invalid application arguments\n");
     }
+    if (!cfg.gw_ip_set) {
+        cfg.gw_ip = cfg.dst_ip;
+    }
 
     if (!rte_eth_dev_is_valid_port(cfg.port_id)) {
         rte_exit(EXIT_FAILURE, "Port %u is not available\n", cfg.port_id);
@@ -471,12 +504,18 @@ int main(int argc, char **argv)
             cfg.port_id, rte_strerror(-ret));
     }
 
+    ret = wait_for_link_up(cfg.port_id);
+    if (ret < 0) {
+        rte_exit(EXIT_FAILURE, "Port %" PRIu16 " link did not come up: %s\n",
+            cfg.port_id, rte_strerror(-ret));
+    }
+
     rte_eth_macaddr_get(cfg.port_id, &cfg.src_mac);
 
     if (!cfg.dst_mac_override) {
-        printf("Resolving ARP for destination IP...\n");
+        printf("Resolving ARP for %s IP...\n", cfg.gw_ip_set ? "gateway" : "destination");
         if (resolve_arp(cfg.port_id, mbuf_pool, &cfg, &keep_running) != 0) {
-            rte_exit(EXIT_FAILURE, "Failed to resolve ARP for destination IP\n");
+            rte_exit(EXIT_FAILURE, "Failed to resolve ARP for next-hop IP\n");
         }
     }
 
@@ -503,6 +542,10 @@ int main(int argc, char **argv)
     printf("  %-10s %" PRIu8 ".%" PRIu8 ".%" PRIu8 ".%" PRIu8 "\n", "dst_ip_mask",
         (uint8_t)(cfg.dst_ip_rnd_mask >> 24), (uint8_t)(cfg.dst_ip_rnd_mask >> 16),
         (uint8_t)(cfg.dst_ip_rnd_mask >> 8), (uint8_t)cfg.dst_ip_rnd_mask);
+    printf("  %-10s %" PRIu8 ".%" PRIu8 ".%" PRIu8 ".%" PRIu8 "%s\n", "gw_ip",
+        (uint8_t)(cfg.gw_ip >> 24), (uint8_t)(cfg.gw_ip >> 16),
+        (uint8_t)(cfg.gw_ip >> 8), (uint8_t)cfg.gw_ip,
+        cfg.gw_ip_set ? "" : " (dst_ip)");
     printf("  %-10s %" PRIu16 "\n", "src_port", cfg.src_port);
     printf("  %-10s 0x%04" PRIx16 "\n", "src_port_mask", cfg.src_port_rnd_mask);
     printf("  %-10s %" PRIu16 "\n", "dst_port", cfg.dst_port);
