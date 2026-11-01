@@ -6,6 +6,7 @@
 #include <time.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -460,17 +461,29 @@ int main(int argc, char **argv)
     unsigned int worker_lcores[RTE_MAX_LCORE];
     uint16_t num_workers = 0;
     int ret;
+    char **eal_argv;
+    int eal_argc;
 
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
 
-    ret = rte_eal_init(argc, argv);
+    eal_argc = argc + 1;
+    eal_argv = malloc((eal_argc + 1) * sizeof(char *));
+    if (eal_argv == NULL) {
+        rte_exit(EXIT_FAILURE, "Out of memory\n");
+    }
+    eal_argv[0] = argv[0];
+    eal_argv[1] = "--in-memory";
+    memcpy(&eal_argv[2], &argv[1], (argc - 1) * sizeof(char *));
+    eal_argv[eal_argc] = NULL;
+
+    ret = rte_eal_init(eal_argc, eal_argv);
     if (ret < 0) {
         rte_exit(EXIT_FAILURE, "Failed to initialize EAL\n");
     }
 
-    argc -= ret;
-    argv += ret;
+    argc = eal_argc - ret;
+    argv = eal_argv + ret;
 
     if (parse_app_args(argc, argv, &cfg) != 0) {
         usage("utg");
